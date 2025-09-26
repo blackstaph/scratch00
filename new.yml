@@ -1,0 +1,32 @@
+- name: Test Safeguard credential retrieval
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Build connection dict
+      set_fact:
+        a2a_conn:
+          spp_appliance: "{{ lookup('env','SPP_APPLIANCE') }}"
+          spp_certificate_file: "{{ lookup('env','SPP_CERT_PATH') }}"
+          spp_certificate_key: "{{ lookup('env','SPP_KEY_PATH') }}"
+          spp_tls_cert: "{{ lookup('env','SPP_CA_PATH') }}"
+          spp_credential_type: "{{ lookup('env','SPP_CRED_TYPE') }}"
+          spp_validate_certs: true
+
+    - name: Retrieve password
+      set_fact:
+        spp_password: >-
+          {{
+            lookup(
+              'oneidentity.safeguardcollection.safeguardcredentials',
+              (lookup('env','SPP_API_KEY')),
+              a2aconnection=a2a_conn,
+              spp_systemname=(lookup('env','SPP_SYSTEM_NAME') or omit),
+              spp_username=(lookup('env','SPP_ACCOUNT_NAME') or omit),
+              spp_registration_index=0
+            )
+          }}
+      no_log: true
+
+    - debug:
+        msg: "Safeguard password retrieved."
+      no_log: true

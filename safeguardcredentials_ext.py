@@ -1,15 +1,10 @@
 # collection/oneidentity/safeguard/plugins/lookup/safeguardcredentials.py
-# DROP-IN EXTENSION: preserves spp_* option names and PySafeguard usage.
 #
-# Behavior:
-# - If target_api_key is provided, use it (unchanged behavior).
-# - Else, if system AND account are provided, derive ApiKey via Core
-#   (A2ARegistrations -> RetrievableAccounts) using the SAME client cert+key,
-#   then perform the A2A retrieval.
+# DROP-IN EXTENSION:
+# - Preserves all original spp_* option names and PySafeguard usage.
+# - Adds optional discovery of the ApiKey from (system, account) when
+#   target_api_key is not provided.
 # - First positional term remains the secret type: 'Password' or 'PrivateKey'.
-#
-# NOTE: Only the minimal logic needed to support (system, account) -> ApiKey was added.
-#       No existing spp_* parameter names were changed or removed.
 
 from ansible.plugins.lookup import LookupBase
 from ansible.errors import AnsibleError
@@ -21,51 +16,59 @@ lookup: oneidentity.safeguardcollection.safeguardcredentials
 author:
   - One Identity
   - Extended by You
-short_description: Retrieve credentials from Safeguard A2A (supports explicit ApiKey or discovery from system/account)
+short_description: Retrieve credentials from One Identity Safeguard A2A (explicit ApiKey or discovery from system/account)
 description:
   - Retrieves a credential secret (Password or PrivateKey) from One Identity Safeguard A2A using client certificate authentication.
   - If C(target_api_key) is provided, the plugin uses it directly (original behavior).
-  - If C(target_api_key) is not provided and both C(system) and C(account) are provided, the plugin discovers the ApiKey via Safeguard Core (A2ARegistrations → RetrievableAccounts) and then retrieves the secret via A2A.
+  - If C(target_api_key) is not provided and both C(system) and C(account) are provided,
+    the plugin discovers the ApiKey by calling Safeguard Core (A2ARegistrations and RetrievableAccounts)
+    using the same client certificate, then retrieves the secret via A2A.
+  - This file preserves all existing C(spp_*) option names to remain a drop-in replacement.
 options:
+  # Canonical, preserved names (do not change)
   spp_appliance:
     description: Safeguard appliance hostname or IP (no scheme).
     type: str
     required: false
   spp_certificate_file:
-    description: Path to the client certificate (PEM).
+    description: Path to the client certificate file in PEM format.
     type: str
     required: false
   spp_key_file:
-    description: Path to the unencrypted client private key (PEM).
+    description: Path to the unencrypted client private key in PEM format.
     type: str
     required: false
   spp_ca_bundle:
-    description: Path to CA bundle (PEM) used when validating HTTPS.
+    description: Path to the CA bundle in PEM format; used when validating HTTPS.
     type: str
     required: false
   spp_api_version:
-    description: A2A API version (for example, v4).
+    description: A2A API version string (for example, v4).
     type: str
     default: v4
   spp_validate_certs:
     description: Whether to validate HTTPS certificates.
     type: bool
     default: true
+
+  # Original parameter to provide an ApiKey explicitly
   target_api_key:
     description:
       - Explicit A2A ApiKey. When provided, the plugin uses it directly.
       - If omitted, provide C(system) and C(account) to derive the ApiKey via Core.
     type: str
     required: false
+
+  # New optional inputs for ApiKey discovery (do not affect existing callers)
   system:
     description:
-      - System (Asset) name to match during Core discovery of the ApiKey.
+      - System (Asset) name used to locate the ApiKey during Core discovery.
       - Required only when C(target_api_key) is not provided.
     type: str
     required: false
   account:
     description:
-      - Account name to match during Core discovery of the ApiKey.
+      - Account name used to locate the ApiKey during Core discovery.
       - Required only when C(target_api_key) is not provided.
     type: str
     required: false
@@ -75,41 +78,16 @@ options:
       - The plugin selects content[spp_registration_index].Id before enumerating retrievable accounts.
     type: int
     default: 0
-  # Aliases (kept optional; do not replace spp_* in existing playbooks)
-  appliance:
-    description: Alias for spp_appliance.
-    type: str
-    required: false
-  certificate_file:
-    description: Alias for spp_certificate_file.
-    type: str
-    required: false
-  key_file:
-    description: Alias for spp_key_file.
-    type: str
-    required: false
-  ca_bundle:
-    description: Alias for spp_ca_bundle.
-    type: str
-    required: false
-  api_version:
-    description: Alias for spp_api_version.
-    type: str
-    required: false
-  validate_certs:
-    description: Alias for spp_validate_certs.
-    type: bool
-    required: false
 notes:
   - Requires the pysafeguard Python package in the Execution Environment.
-  - The private key file must be unencrypted (no passphrase).
-  - First positional term remains the secret type: Password or PrivateKey.
+  - The client private key file must be unencrypted (no passphrase).
+  - The first positional term is the secret type and must be either Password or PrivateKey.
 """
 
 EXAMPLES = r"""
-# ORIGINAL BEHAVIOR (explicit ApiKey, spp_* params unchanged)
+# 1) Original behavior: explicit ApiKey with preserved spp_* options
 - set_fact:
-    my_password: >-
+    safeguard_password: >-
       {{ lookup('oneidentity.safeguardcollection.safeguardcredentials',
                 'Password',
                 target_api_key=my_api_key,
@@ -120,9 +98,9 @@ EXAMPLES = r"""
                 spp_api_version='v4',
                 spp_validate_certs=true) }}
 
-# NEW PATH (derive ApiKey from system/account, then retrieve secret) — spp_* names preserved
+# 2) New behavior: derive ApiKey from (system, account), then retrieve the secret
 - set_fact:
-    my_password: >-
+    safeguard_password: >-
       {{ lookup('oneidentity.safeguardcollection.safeguardcredentials',
                 'Password',
                 system='WindowsAD01',
@@ -135,23 +113,23 @@ EXAMPLES = r"""
                 spp_validate_certs=true,
                 spp_registration_index=0) }}
 
-# Using aliases (optional): appliance/certificate_file/key_file instead of spp_* (spp_* still canonical)
+# 3) Private key retrieval with explicit ApiKey (unchanged)
 - set_fact:
-    my_private_key: >-
+    safeguard_private_key: >-
       {{ lookup('oneidentity.safeguardcollection.safeguardcredentials',
                 'PrivateKey',
                 target_api_key=my_api_key,
-                appliance='spp.example.com',
-                certificate_file='/etc/spp/appcert.pem',
-                key_file='/etc/spp/appkey.pem',
-                ca_bundle='/etc/ssl/certs/ca-bundle.pem',
-                api_version='v4',
-                validate_certs=true) }}
+                spp_appliance='spp.example.com',
+                spp_certificate_file='/etc/spp/appcert.pem',
+                spp_key_file='/etc/spp/appkey.pem',
+                spp_ca_bundle='/etc/ssl/certs/ca-bundle.pem',
+                spp_api_version='v4',
+                spp_validate_certs=true) }}
 """
 
 RETURN = r"""
 _raw:
-  description: The retrieved credential as a string (password text or private-key material).
+  description: The retrieved credential as a string (password text or private key material).
   type: str
 """
 
@@ -162,34 +140,32 @@ class LookupModule(LookupBase):
     """
 
     def run(self, terms, variables=None, **kwargs):
-        # 1) secret type
+        # 1) secret type (positional term, unchanged)
         if not terms:
             raise AnsibleError("usage: lookup('...safeguardcredentials', 'Password'|'PrivateKey', ...)")
         secret_type = str(terms[0]).strip()
 
-        # 2) normalize spp_* options (canonical) with non-prefixed aliases accepted
-        spp_appliance = kwargs.get("spp_appliance") or kwargs.get("appliance")
-        spp_certificate_file = kwargs.get("spp_certificate_file") or kwargs.get("certificate_file")
-        spp_key_file = kwargs.get("spp_key_file") or kwargs.get("key_file")
-        spp_ca_bundle = kwargs.get("spp_ca_bundle") or kwargs.get("ca_bundle")
-        spp_api_version = kwargs.get("spp_api_version") or kwargs.get("api_version") or "v4"
-        spp_validate_certs = kwargs.get("spp_validate_certs")
-        if spp_validate_certs is None:
-            spp_validate_certs = kwargs.get("validate_certs", True)
+        # 2) normalize preserved spp_* options
+        spp_appliance = kwargs.get("spp_appliance")
+        spp_certificate_file = kwargs.get("spp_certificate_file")
+        spp_key_file = kwargs.get("spp_key_file")
+        spp_ca_bundle = kwargs.get("spp_ca_bundle")
+        spp_api_version = kwargs.get("spp_api_version", "v4")
+        spp_validate_certs = kwargs.get("spp_validate_certs", True)
 
         if not spp_appliance:
-            raise AnsibleError("Missing spp_appliance (or alias: appliance)")
+            raise AnsibleError("Missing spp_appliance")
         if not spp_certificate_file or not spp_key_file:
             raise AnsibleError("spp_certificate_file and spp_key_file are required")
 
-        # resolve file paths early (unchanged behavior expectation)
+        # Resolve file paths and verify existence (unchanged expectation)
         spp_certificate_file = self._abs_ok(spp_certificate_file, "spp_certificate_file")
         spp_key_file = self._abs_ok(spp_key_file, "spp_key_file")
         if spp_validate_certs and spp_ca_bundle:
             spp_ca_bundle = self._abs_ok(spp_ca_bundle, "spp_ca_bundle")
         verify = (spp_ca_bundle if spp_validate_certs else False)
 
-        # 3) resolve/derive api_key
+        # 3) resolve or derive api_key
         api_key = kwargs.get("target_api_key")
         if not api_key:
             system = kwargs.get("system")
@@ -208,7 +184,7 @@ class LookupModule(LookupBase):
             )
 
         # 4) A2A retrieval via PySafeguard (Authorization: A2A <api_key>)
-        atype = self._atype_from_secret(secret_type)
+        a2a_type = self._atype_from_secret(secret_type)
         try:
             secret = PySafeguardConnection.a2a_get_credential(
                 spp_appliance,
@@ -216,15 +192,16 @@ class LookupModule(LookupBase):
                 spp_certificate_file,
                 spp_key_file,
                 verify,
-                atype,
+                a2a_type,
                 api_version=spp_api_version
             )
         except Exception as e:
             raise AnsibleError(f"A2A retrieval failed: {e}")
 
+        # Lookup plugins return a list
         return [secret if isinstance(secret, str) else str(secret)]
 
-    # --- helpers ---
+    # ---------------- helpers ----------------
 
     def _abs_ok(self, path, label):
         p = os.path.expanduser(os.path.expandvars(path or ""))
@@ -233,7 +210,7 @@ class LookupModule(LookupBase):
         return os.path.abspath(p)
 
     def _atype_from_secret(self, secret_type):
-        s = secret_type.lower()
+        s = str(secret_type).strip().lower()
         if s == "password":
             return A2ATypes.PASSWORD
         if s in ("privatekey", "private_key", "ssh_private_key"):
@@ -255,6 +232,7 @@ class LookupModule(LookupBase):
         except Exception as e:
             raise AnsibleError(f"certificate connect failed: {e}")
 
+        # List registrations and select by index
         try:
             r = conn.invoke(HttpMethods.GET, Services.CORE, "A2ARegistrations")
             regs = r.json()
@@ -273,6 +251,7 @@ class LookupModule(LookupBase):
         if reg_id is None:
             raise AnsibleError(f"registration missing Id: {reg}")
 
+        # Enumerate retrievable accounts and find the match
         page, limit = 0, 200
         while True:
             try:

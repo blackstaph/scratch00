@@ -1,10 +1,11 @@
 # collection/oneidentity/safeguard/plugins/lookup/safeguardcredentials.py
 #
-# DROP-IN EXTENSION:
-# - Preserves all original spp_* option names and PySafeguard usage.
-# - Adds optional discovery of the ApiKey from (system, account) when
-#   target_api_key is not provided.
-# - First positional term remains the secret type: 'Password' or 'PrivateKey'.
+# DROP-IN EXTENSION (preserves ALL existing spp_* option names and PySafeguard usage)
+# - If target_api_key is supplied: use it directly (unchanged vendor behavior)
+# - Else, if system AND account are supplied: discover ApiKey via Core, then retrieve via A2A
+# - First positional term remains the secret type: 'Password' or 'PrivateKey'
+#
+# NOTE: This file assumes the Execution Environment includes the 'pysafeguard' package.
 
 from ansible.plugins.lookup import LookupBase
 from ansible.errors import AnsibleError
@@ -23,9 +24,9 @@ description:
   - If C(target_api_key) is not provided and both C(system) and C(account) are provided,
     the plugin discovers the ApiKey by calling Safeguard Core (A2ARegistrations and RetrievableAccounts)
     using the same client certificate, then retrieves the secret via A2A.
-  - This file preserves all existing C(spp_*) option names to remain a drop-in replacement.
+  - All existing C(spp_*) option names are preserved for drop-in compatibility.
 options:
-  # Canonical, preserved names (do not change)
+  # Canonical, preserved names (do NOT change)
   spp_appliance:
     description: Safeguard appliance hostname or IP (no scheme).
     type: str
@@ -59,7 +60,7 @@ options:
     type: str
     required: false
 
-  # New optional inputs for ApiKey discovery (do not affect existing callers)
+  # New optional inputs for ApiKey discovery (do NOT affect existing callers)
   system:
     description:
       - System (Asset) name used to locate the ApiKey during Core discovery.
@@ -145,7 +146,7 @@ class LookupModule(LookupBase):
             raise AnsibleError("usage: lookup('...safeguardcredentials', 'Password'|'PrivateKey', ...)")
         secret_type = str(terms[0]).strip()
 
-        # 2) normalize preserved spp_* options
+        # 2) normalize preserved spp_* options (exact names preserved)
         spp_appliance = kwargs.get("spp_appliance")
         spp_certificate_file = kwargs.get("spp_certificate_file")
         spp_key_file = kwargs.get("spp_key_file")
@@ -165,7 +166,7 @@ class LookupModule(LookupBase):
             spp_ca_bundle = self._abs_ok(spp_ca_bundle, "spp_ca_bundle")
         verify = (spp_ca_bundle if spp_validate_certs else False)
 
-        # 3) resolve or derive api_key
+        # 3) resolve or derive ApiKey
         api_key = kwargs.get("target_api_key")
         if not api_key:
             system = kwargs.get("system")

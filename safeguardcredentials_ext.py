@@ -47,7 +47,6 @@ options:
         description: Whether to validate HTTPS certificates.
         type: bool
         default: true
-      # The original plugin may accept additional keys; they are ignored here if not needed.
   spp_systemname:
     description: System (Asset) name used to derive ApiKey when positional ApiKey is empty.
     type: str
@@ -159,7 +158,6 @@ class LookupModule(LookupBase):
                 spp_appliance, api_key, cert_file, key_file, verify, a2a_type
             )
         except TypeError as te:
-            # If underlying library expects historical positional order, retry safely
             try:
                 secret = PySafeguardConnection.a2a_get_credential(
                     spp_appliance, api_key, cert_file, key_file, verify, a2a_type
@@ -186,6 +184,15 @@ class LookupModule(LookupBase):
             return A2ATypes.PRIVATE_KEY
         raise AnsibleError(f"Unsupported spp_credential_type: {t!r}")
 
+    def _unwrap(self, payload):
+        """Handle paged wrapper objects like {'Data': [...]} or {'Items': [...]}."""
+        if isinstance(payload, dict):
+            for k in ("Data", "data", "Items", "items", "Value", "value", "Results"):
+                v = payload.get(k)
+                if isinstance(v, list):
+                    return v
+        return payload
+
     def _discover_apikey(self, appliance, cert_file, key_file, verify,
                          systemname, username, registration_index=0):
         """
@@ -203,7 +210,7 @@ class LookupModule(LookupBase):
         # Registrations
         try:
             r = conn.invoke(HttpMethods.GET, Services.CORE, "A2ARegistrations")
-            regs = r.json()
+            regs = self._unwrap(r.json())
         except Exception as e:
             raise AnsibleError(f"A2ARegistrations request failed: {e}")
 
@@ -228,7 +235,7 @@ class LookupModule(LookupBase):
                     f"A2ARegistrations/{reg_id}/RetrievableAccounts",
                     query={"page": page, "limit": limit}
                 )
-                ras = rr.json()
+                ras = self._unwrap(rr.json())
             except Exception as e:
                 raise AnsibleError(f"RetrievableAccounts request failed (page {page}): {e}")
 

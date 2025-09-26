@@ -21,16 +21,12 @@ lookup: oneidentity.safeguardcollection.safeguardcredentials
 author:
   - One Identity
   - Extended by You
-short_description: Retrieve credentials from One Identity Safeguard A2A (supports explicit ApiKey or discovery from system/account)
+short_description: Retrieve credentials from Safeguard A2A (supports explicit ApiKey or discovery from system/account)
 description:
-  - Retrieves a credential secret (C(Password) or C(PrivateKey)) from One Identity Safeguard A2A using client certificate authentication.
+  - Retrieves a credential secret (Password or PrivateKey) from One Identity Safeguard A2A using client certificate authentication.
   - If C(target_api_key) is provided, the plugin uses it directly (original behavior).
-  - If C(target_api_key) is not provided and both C(system) and C(account) are provided,
-    the plugin first discovers the ApiKey via Safeguard Core (C(/service/core/v4/A2ARegistrations) and C(/RetrievableAccounts)),
-    then uses that ApiKey for A2A retrieval (C(Authorization: A2A <api_key>)).
-  - Existing C(spp_*) option names are preserved to maintain drop-in compatibility. Non-prefixed aliases are honored as convenience aliases.
+  - If C(target_api_key) is not provided and both C(system) and C(account) are provided, the plugin discovers the ApiKey via Safeguard Core (A2ARegistrations → RetrievableAccounts) and then retrieves the secret via A2A.
 options:
-  # --- ORIGINAL / CANONICAL NAMES (preserved) ---
   spp_appliance:
     description: Safeguard appliance hostname or IP (no scheme).
     type: str
@@ -48,7 +44,7 @@ options:
     type: str
     required: false
   spp_api_version:
-    description: A2A API version (e.g. C(v4)).
+    description: A2A API version (for example, v4).
     type: str
     default: v4
   spp_validate_certs:
@@ -61,8 +57,6 @@ options:
       - If omitted, provide C(system) and C(account) to derive the ApiKey via Core.
     type: str
     required: false
-
-  # --- NEW (DISCOVERY) INPUTS (ADDED; DO NOT BREAK EXISTING CALLERS) ---
   system:
     description:
       - System (Asset) name to match during Core discovery of the ApiKey.
@@ -77,41 +71,39 @@ options:
     required: false
   spp_registration_index:
     description:
-      - Zero-based index into the registrations list returned by Core C(/A2ARegistrations).
-      - The plugin selects C(content[spp_registration_index].Id) before enumerating retrievable accounts.
+      - Zero-based index into the registrations list returned by Core A2ARegistrations.
+      - The plugin selects content[spp_registration_index].Id before enumerating retrievable accounts.
     type: int
     default: 0
-
-  # --- CONVENIENCE ALIASES (OPTIONAL; DO NOT CHANGE spp_* NAMES) ---
+  # Aliases (kept optional; do not replace spp_* in existing playbooks)
   appliance:
-    description: Alias for C(spp_appliance).
+    description: Alias for spp_appliance.
     type: str
     required: false
   certificate_file:
-    description: Alias for C(spp_certificate_file).
+    description: Alias for spp_certificate_file.
     type: str
     required: false
   key_file:
-    description: Alias for C(spp_key_file).
+    description: Alias for spp_key_file.
     type: str
     required: false
   ca_bundle:
-    description: Alias for C(spp_ca_bundle).
+    description: Alias for spp_ca_bundle.
     type: str
     required: false
   api_version:
-    description: Alias for C(spp_api_version).
+    description: Alias for spp_api_version.
     type: str
     required: false
   validate_certs:
-    description: Alias for C(spp_validate_certs).
+    description: Alias for spp_validate_certs.
     type: bool
     required: false
 notes:
-  - This plugin requires the C(pysafeguard) Python package to be available in the Execution Environment.
-  - The client private key file must be unencrypted (no passphrase).
-  - The first positional term must be the secret type: C(Password) or C(PrivateKey).
-  - All existing C(spp_*) parameter names are preserved verbatim for drop-in compatibility.
+  - Requires the pysafeguard Python package in the Execution Environment.
+  - The private key file must be unencrypted (no passphrase).
+  - First positional term remains the secret type: Password or PrivateKey.
 """
 
 EXAMPLES = r"""

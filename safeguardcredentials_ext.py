@@ -1,9 +1,11 @@
 # collection/oneidentity/safeguard/plugins/lookup/safeguardcredentials.py
 #
-# DROP-IN EXTENSION (no interface changes):
-# - Positional term is still the ApiKey ('' allowed to trigger discovery)
-# - a2aconnection dict uses the original spp_* keys (unchanged)
-# - Optional discovery when spp_systemname + spp_username are provided
+# TRUE DROP-IN EXTENSION (no interface/dep changes):
+# - First positional term is still the ApiKey ('' allowed to trigger discovery)
+# - Connection dict is still 'a2aconnection' with the original spp_* keys
+# - Uses pysafeguard and the original a2a_get_credential signature (NO api_version kwarg)
+# - Only addition: if ApiKey is empty and spp_systemname+spp_username are provided,
+#   derive the ApiKey via Core (A2ARegistrations → RetrievableAccounts) using the same cert+key.
 
 from ansible.plugins.lookup import LookupBase
 from ansible.errors import AnsibleError
@@ -15,12 +17,11 @@ lookup: oneidentity.safeguardcollection.safeguardcredentials
 author:
   - One Identity
   - Extended by You
-short_description: Retrieve credentials from One Identity Safeguard A2A
+short_description: Retrieve credentials from One Identity Safeguard A2A (drop-in extension)
 description:
-  - Uses the original interface where the first positional term is the ApiKey.
-  - If the positional ApiKey is empty and both C(spp_systemname) and C(spp_username) are provided,
-    the plugin derives the ApiKey via Core (A2ARegistrations and RetrievableAccounts) using the same client certificate.
-  - Connection parameters are supplied via C(a2aconnection) with the original C(spp_*) keys.
+  - Keeps the vendor interface intact: the first positional term is the ApiKey; the connection dict is passed as C(a2aconnection) using C(spp_*) keys.
+  - If the positional ApiKey is empty and both C(spp_systemname) and C(spp_username) are supplied, the ApiKey is discovered via Core using the same client certificate.
+  - Uses the original C(pysafeguard) client and the original C(a2a_get_credential) signature (no extra kwargs).
 options:
   a2aconnection:
     description: Connection parameters (original spp_* keys).
@@ -42,14 +43,11 @@ options:
       spp_credential_type:
         description: password or privatekey
         type: str
-      spp_api_version:
-        description: A2A API version (e.g. v4)
-        type: str
-        default: v4
       spp_validate_certs:
         description: Whether to validate HTTPS certificates.
         type: bool
         default: true
+      # The original plugin may accept additional keys; they are ignored here if not needed.
   spp_systemname:
     description: System (Asset) name used to derive ApiKey when positional ApiKey is empty.
     type: str
@@ -64,7 +62,7 @@ options:
     default: 0
 notes:
   - Requires the pysafeguard Python package in the Execution Environment.
-  - Private key file must be unencrypted.
+  - Private key file must be unencrypted (no passphrase).
   - First positional term remains the ApiKey (use '' to enable discovery with spp_systemname + spp_username).
 """
 
@@ -80,7 +78,6 @@ EXAMPLES = r"""
                   'spp_certificate_key': key,
                   'spp_tls_cert': cacert,
                   'spp_credential_type': 'password',
-                  'spp_api_version': 'v4',
                   'spp_validate_certs': true
                 }) }}
 
@@ -95,7 +92,6 @@ EXAMPLES = r"""
                   'spp_certificate_key': key,
                   'spp_tls_cert': cacert,
                   'spp_credential_type': 'password',
-                  'spp_api_version': 'v4',
                   'spp_validate_certs': true
                 },
                 spp_systemname=system_name,
@@ -126,7 +122,6 @@ class LookupModule(LookupBase):
         spp_certificate_key  = conn.get("spp_certificate_key")
         spp_tls_cert         = conn.get("spp_tls_cert")
         spp_credential_type  = conn.get("spp_credential_type", "password")
-        spp_api_version      = conn.get("spp_api_version", "v4")
         spp_validate_certs   = conn.get("spp_validate_certs", True)
 
         if not spp_appliance:
@@ -136,6 +131,7 @@ class LookupModule(LookupBase):
 
         cert_file = self._abs_ok(spp_certificate_file, "spp_certificate_file")
         key_file  = self._abs_ok(spp_certificate_key,  "spp_certificate_key")
+
         if spp_validate_certs:
             if not spp_tls_cert:
                 raise AnsibleError("spp_tls_cert is required when spp_validate_certs is true")
@@ -158,9 +154,18 @@ class LookupModule(LookupBase):
         # 4) Map credential type and fetch via A2A (Authorization: A2A <api_key>)
         a2a_type = self._map_type(spp_credential_type)
         try:
+            # IMPORTANT: original signature—no api_version kwarg
             secret = PySafeguardConnection.a2a_get_credential(
-                spp_appliance, api_key, cert_file, key_file, verify, a2a_type, api_version=spp_api_version
+                spp_appliance, api_key, cert_file, key_file, verify, a2a_type
             )
+        except TypeError as te:
+            # If underlying library expects historical positional order, retry safely
+            try:
+                secret = PySafeguardConnection.a2a_get_credential(
+                    spp_appliance, api_key, cert_file, key_file, verify, a2a_type
+                )
+            except Exception:
+                raise AnsibleError(f"A2A retrieval failed: {te}")
         except Exception as e:
             raise AnsibleError(f"A2A retrieval failed: {e}")
 
@@ -195,6 +200,7 @@ class LookupModule(LookupBase):
         except Exception as e:
             raise AnsibleError(f"certificate connect failed: {e}")
 
+        # Registrations
         try:
             r = conn.invoke(HttpMethods.GET, Services.CORE, "A2ARegistrations")
             regs = r.json()
@@ -213,6 +219,7 @@ class LookupModule(LookupBase):
         if reg_id is None:
             raise AnsibleError(f"registration missing Id: {reg}")
 
+        # Retrievable accounts → find match
         page, limit = 0, 200
         while True:
             try:
